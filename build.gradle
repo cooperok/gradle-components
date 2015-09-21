@@ -28,13 +28,6 @@ apply from: 'components.gradle'
 
 dependencies {
     testCompile 'junit:junit:4.12'
-    compile('com.googlecode.json-simple:json-simple:1.1.1') {
-        exclude group: 'junit', module: 'junit'
-    }
-	
 	//Gradle plugins requires Gradle API interfaces and classes to compile
 	compile gradleApi()
-
-    //compile localGroovy()
-
 }
