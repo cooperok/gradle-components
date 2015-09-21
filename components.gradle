@@ -1,0 +1,141 @@
+//создаем свой тип задачи, по которому будем определять задачи для выполнения
+class ComponentsJar extends Jar {
+}
+
+//вспомогательный класс, содержащий данные о компоненте
+class Artifact {
+    String path, groupId, version, id, name
+}
+
+//массив объектов Artifact, содержащий информацию о всех возможных компонентах
+def artifacts = [];
+
+//массив объектов Artifact, содержащий информацию только о тех компонентах,
+//которые будут скомпилированы и опубликованы
+def activeArtifacts = [];
+
+//Список компонентов
+def components = [
+        [name: 'logger',    version:'1.0'],
+        [name: 'util',      version:'1.0']
+]
+
+//Список плагинов Gradle
+def plugins = [
+        [name:'android-signing',              version:'1.0',  packagePrefix:'signing'],
+        [name:'android-library-publishing',   version:'1.0',  packagePrefix:'publishing'],
+        [name:'android-base',                 version:'1.0',  packagePrefix:'android']
+]
+
+//Общие настройки задачи для плагинов и компонентов
+def baseTask = { task, component, packages ->
+    task.version component.version
+    task.classifier component.classifier
+    task.baseName component.name
+    task.from sourceSets.main.output
+    def componentPackages = []
+
+    //Если указан префикс, подставляем его, во всех остальных случаях пакет называется также как и компонент
+    componentPackages.add(component.packagePrefix ? "com/example/${component.packagePrefix}/**" : "com/example/${component.name}/**")
+    if (packages != null) {
+        componentPackages.addAll(packages)
+    }
+    task.include componentPackages
+
+    //Для каждой задачи создаем артефакт с информацией о компоненте
+    def art = new Artifact(
+            name: component.name,
+            groupId: "com.example",
+            path: "$buildDir/libs/$task.archiveName",
+            id: task.appendix == null ? component.name : "$component.name-$task.appendix",
+            version: component.version
+    )
+
+    artifacts.add(art)
+
+    //Первым делом при выполнении задачи сохраняем ее артефакт, для дальнейшей работы с ним
+    task.doFirst {
+        activeArtifacts.add(art)
+    }
+
+    //После выполнения задачи вызывает задачу по генерации pom.xml для этой сборки
+    task.doLast {
+        tasks."generatePomFileFor${art.name.capitalize()}Publication".execute()
+    }
+}
+
+//Создаем отдельные задачи для сборки каждого отдельного компонента
+components.each { component ->
+    task "compile${component.name.capitalize()}" (type: ComponentsJar) {
+        baseTask(it, component, component.package)
+    }
+}
+
+//Создаем отдельные задачи для сборки каждого отдельного плагина
+plugins.each { component ->
+    task "compile${component.name.capitalize()}" (type: ComponentsJar) {
+        //для плагинов добавляем в название jar файла добавляем 'plugin' (хотя это никак не влияет на название при публикации)
+        appendix 'plugin'
+
+        //для плагинов обязательным условием является наличие файла с его именем, в котором будет указан класс с его реализацией
+        def packages = ["META-INF/gradle-plugins/${component.name}.properties"]
+        if (component.package != null) {
+            packages.addAll(component.package)
+        }
+        baseTask(it, component, packages);
+    }
+}
+
+//Создаем отдельную задачу для сборки всех компонентов
+task compileComponents {}
+
+//Для которой указываем зависимость на все задачи по сборке компонентов
+compileComponents.dependsOn {
+    tasks.withType(ComponentsJar)
+}
+
+jar {
+    //После выполнения задачи удаляем jar собраный из всех пакетов
+    doLast {
+        new File(it.destinationDir, "${project.name}.jar").delete()
+    }
+}
+
+//Готовим отдельную публикацию для каждого из компонентов
+//выполняется на этапе конфигурации, поэтому в любом случае создаются публикации для всех возможных компонентов
+//поэтому используется переменная artifacts
+publishing {
+    publications {
+        artifacts.each { art ->
+            "$art.name"(MavenPublication) {
+                groupId art.groupId
+                version = art.version
+                artifactId art.id
+
+                artifact(art.path)
+            }
+        }
+    }
+}
+
+//Для artifactory добавляем публикацию на этапе выполнения, поэтому есть возможность публиковать только указанные сборки
+artifactoryPublish {
+    doFirst {
+        activeArtifacts.each { artifact ->
+            publications(artifact.name)
+        }
+    }
+}
+
+artifactory {
+    contextUrl = ArtifactoryUrl
+    publish {
+        repository {
+            //имя репозитория, в который будут добавлятся сборки
+            repoKey = 'libs-release-local'
+
+            username = ArtifactoryUser
+            password = ArtifactoryPassword
+        }
+    }
+}

@@ -1,0 +1,40 @@
+buildscript {
+    repositories {
+        jcenter()
+        maven {
+            url "$ArtifactoryUrl/libs-release-local"
+            credentials {
+                username = ArtifactoryUser
+                password = ArtifactoryPassword
+            }
+        }
+    }
+    dependencies {
+        classpath 'org.jfrog.buildinfo:build-info-extractor-gradle:3.1.1'
+    }
+}
+
+allprojects {
+    repositories {
+        jcenter()
+    }
+}
+
+apply plugin: 'com.jfrog.artifactory'
+apply plugin: 'maven-publish'
+apply plugin: 'groovy'
+
+apply from: 'components.gradle'
+
+dependencies {
+    testCompile 'junit:junit:4.12'
+    compile('com.googlecode.json-simple:json-simple:1.1.1') {
+        exclude group: 'junit', module: 'junit'
+    }
+	
+	//Gradle plugins requires Gradle API interfaces and classes to compile
+	compile gradleApi()
+
+    //compile localGroovy()
+
+}
